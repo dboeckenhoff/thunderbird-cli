@@ -489,7 +489,7 @@ async function handleRequest({ method, path, body }) {
   if (path === "/compose" && method === "POST") {
     const { to, cc, bcc, subject, body: msgBody, isHTML = false,
             identityId, send = false, draft = false, open = false,
-            priority } = body;
+            priority, header, attachments } = body;
     const details = {};
     if (to) details.to = Array.isArray(to) ? to : [to];
     if (cc) details.cc = Array.isArray(cc) ? cc : [cc];
@@ -498,8 +498,19 @@ async function handleRequest({ method, path, body }) {
     if (isHTML) { details.isPlainText = false; details.body = msgBody; }
     else { details.isPlainText = true; details.plainTextBody = msgBody; }
     if (identityId) details.identityId = identityId;
-    if (priority) details.customHeaders = [{ name: "X-Priority", value: priorityToValue(priority) }];
+    const customHeaders = [];
+    for (const h of Array.isArray(header) ? header : [header]) {
+      const parsed = parseCustomHeader(h);
+      if (parsed) customHeaders.push(parsed);
+    }
+    if (priority) customHeaders.push({ name: "X-Priority", value: priorityToValue(priority) });
+    if (customHeaders.length) details.customHeaders = customHeaders;
     const tab = await messenger.compose.beginNew(null, details);
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      for (const att of attachments) {
+        await addComposeAttachment(tab.id, att);
+      }
+    }
     if (send) {
       await messenger.compose.sendMessage(tab.id, { mode: "sendNow" });
       return { success: true, action: "sent" };
@@ -839,6 +850,47 @@ function filterBulkMessages(messages, filters) {
     result = result.filter((m) => (m.subject || "").toLowerCase().includes(subj));
   }
   return result;
+}
+
+// Parse "Key: value" from the CLI's --header form; null when not a valid pair.
+// Splits on the FIRST colon, so values may contain colons (References: <a@b> <c@d>).
+function parseCustomHeader(header) {
+  if (typeof header !== "string") return null;
+  const i = header.indexOf(":");
+  if (i <= 0) return null;
+  return { name: header.slice(0, i).trim(), value: header.slice(i + 1).trim() };
+}
+
+// Inlined from extension/src/attachment-utils.js (unit-tested there): MV2
+// background scripts cannot import ES modules, so the tested copy lives in the
+// module and this one must stay in sync with it.
+function base64ToUint8Array(b64) {
+  if (typeof b64 !== "string") {
+    throw new Error("base64ToUint8Array: expected a string, got " + typeof b64);
+  }
+  const s = b64.replace(/\s+/g, "");
+  if (s.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/.test(s)) {
+    throw new Error("base64ToUint8Array: input is not valid base64");
+  }
+  const binary = atob(s);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+// Add one base64 payload attachment to a compose tab. The messenger.compose
+// API takes a File object; WebExtension background scripts have no file access,
+// so the bytes travel CLI -> bridge -> extension as base64 and are turned into
+// a File here (messenger.compose.addAttachment, available since TB 128).
+async function addComposeAttachment(tabId, att) {
+  if (!att || typeof att !== "object" || typeof att.data !== "string") {
+    throw new Error("each attachment needs a base64 `data` field");
+  }
+  const name = typeof att.name === "string" && att.name ? att.name : "attachment";
+  const bytes = base64ToUint8Array(att.data); // throws loudly on invalid base64
+  const fileOpts = att.contentType ? { type: att.contentType } : {};
+  const file = new File([bytes], name, fileOpts);
+  await messenger.compose.addAttachment(tabId, { file, name });
 }
 
 function priorityToValue(priority) {

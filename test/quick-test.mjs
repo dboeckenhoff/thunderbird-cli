@@ -7,6 +7,10 @@
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import { randomUUID } from "crypto";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const PORT = 19700;
 const WS_PORT = 19701;
@@ -46,7 +50,18 @@ function handle({ method, path, body }) {
   if (path?.match(/^\/messages\/\d+$/) && method === "GET") return { id: 1, subject: "T", author: "a@b", date: "2026-04-01", read: false, flagged: false, junk: false, size: 100, tags: ["$l1"], folder: null, parts: { text: "Hello world", html: "", attachments: [] } };
   if (path === "/tags") return [{ key: "$l1", tag: "Important", color: "#FF0000" }];
   if (path === "/tags/create") return { success: true, ...body };
-  if (path === "/compose") return { success: true, action: body?.send ? "sent" : body?.open ? "draft_opened" : "draft_saved" };
+  if (path === "/compose") return {
+    success: true,
+    action: body?.send ? "sent" : body?.open ? "draft_opened" : "draft_saved",
+    // Echo back what the CLI sent, so tests can verify the attachment payload
+    attachments: (body?.attachments || []).map(a => ({
+      name: a.name,
+      contentType: a.contentType,
+      size: a.data ? Buffer.from(a.data, "base64").length : 0,
+      firstBytes: a.data ? [...Buffer.from(a.data, "base64").slice(0, 3)] : [],
+    })),
+    header: body?.header ?? null,
+  };
   if (path === "/reply") return { success: true, action: body?.send ? "sent" : "draft_saved" };
   if (path === "/forward") return { success: true, action: body?.send ? "sent" : "draft_saved" };
   if (path === "/stats") return { totalAccounts: 1, totalUnread: 5, totalMessages: 100, accounts: [] };
@@ -198,6 +213,68 @@ console.log("\n\x1b[1mBulk\x1b[0m");
 test("POST /bulk/delete", await httpCall("POST", "/bulk/delete", { folderId: "f1" }), r => r.success);
 test("POST /bulk/tag", await httpCall("POST", "/bulk/tag", { folderId: "f1", tagKey: "$l1" }), r => r.success);
 test("POST /bulk/fetch", await httpCall("POST", "/bulk/fetch", { folderId: "f1" }), r => r.success);
+
+console.log("\n\x1b[1mCLI compose --attach (subprocess vs mock bridge)\x1b[0m");
+{
+  const { spawn } = await import("child_process");
+  const { mkdtempSync, writeFileSync, rmSync } = await import("fs");
+  const os = await import("os");
+  const pathMod = await import("path");
+
+  const tmpDir = mkdtempSync(pathMod.join(os.tmpdir(), "tb-attach-"));
+  const attachBody = "attachment body \u00e4\u00f6\u00fc";
+  const attachPath = pathMod.join(tmpDir, "hello.txt");
+  writeFileSync(attachPath, attachBody);
+  const attachBytes = Buffer.from(attachBody);
+
+  try {
+    const cli = join(__dirname, "../cli/src/cli.js");
+    // Async spawn: spawnSync would block this process's event loop, and the mock
+    // bridge under test lives in this process.
+    const cliCompose = (args) =>
+      new Promise((resolve) => {
+        const child = spawn(process.execPath, [cli, "compose", ...args], {
+          env: { ...process.env, TB_BRIDGE_HOST: "127.0.0.1", TB_BRIDGE_PORT: String(PORT) },
+        });
+        let stdout = "", stderr = "";
+        child.stdout.on("data", d => (stdout += d));
+        child.stderr.on("data", d => (stderr += d));
+        child.on("close", code => resolve({ code, stdout, stderr }));
+      });
+    const parse = (r) => {
+      try { return JSON.parse(r.stdout); } catch { return { ok: false, error: r.stderr?.slice(0, 200) || r.stdout?.slice(0, 200) }; }
+    };
+
+    const r1 = parse(await cliCompose(["--to", "a@b", "--subject", "T", "--body", "Hi", "--attach", attachPath]));
+    test("tb compose --attach <file> succeeds", r1, r => r.ok === true && r.data?.action === "draft_saved");
+    test("attachment name is the file basename", r1, r => r.data?.attachments?.[0]?.name === "hello.txt");
+    test("attachment size matches file bytes", r1, r => r.data?.attachments?.[0]?.size === attachBytes.length);
+    test("attachment content round-trips (base64)", r1, r =>
+      r.data?.attachments?.[0]?.firstBytes?.join(",") === [...attachBytes.slice(0, 3)].join(","));
+    test("attachment content-type is guessed from extension", r1, r =>
+      r.data?.attachments?.[0]?.contentType === "text/plain");
+
+    const r2 = parse(await cliCompose(["--to", "a@b", "--subject", "T", "--body", "Hi"]));
+    test("compose without --attach sends no attachments", r2, r =>
+      r.ok === true && r.data?.attachments?.length === 0);
+
+    const r4 = parse(await cliCompose([
+      "--to", "a@b", "--subject", "T", "--body", "Hi",
+      "--header", "In-Reply-To:<mid@host>",
+      "--header", "References:<root@host> <mid@host>",
+    ]));
+    test("repeated --header keeps every header (threading)", r4, r =>
+      r.ok === true &&
+      JSON.stringify(r.data?.header) === JSON.stringify(["In-Reply-To:<mid@host>", "References:<root@host> <mid@host>"]));
+
+    const r3 = await cliCompose(["--to", "a@b", "--subject", "T", "--body", "Hi", "--attach", pathMod.join(tmpDir, "nope.pdf")]);
+    test("tb compose --attach missing file exits 1", { code: r3.code, err: r3.stderr?.slice(0, 120) },
+      r => r.code === 1);
+    test("missing file error names the file", { err: r3.stderr }, r => r.err?.includes("nope.pdf"));
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
 
 console.log(`\n\x1b[1m${"─".repeat(40)}\x1b[0m`);
 console.log(`\x1b[1m${passed} passed, ${failed} failed, ${passed + failed} total\x1b[0m\n`);

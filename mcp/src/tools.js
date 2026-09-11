@@ -238,6 +238,12 @@ export const tools = [
           description: "draft (default, saves silently), open (compose window), send (immediate)",
           default: "draft",
         },
+        attachments: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Files to attach (paths on the machine running the MCP server), up to 20 MiB each",
+        },
       },
       required: ["to", "body"],
     },
@@ -256,6 +262,10 @@ export const tools = [
       if (mode === "send") payload.send = true;
       else if (mode === "open") payload.open = true;
       else payload.draft = true;
+      if (Array.isArray(args.attachments) && args.attachments.length) {
+        const { readAttachment } = await import("./attachments.js");
+        payload.attachments = args.attachments.map(readAttachment);
+      }
       return await api("POST", "/compose", payload);
     },
   },
