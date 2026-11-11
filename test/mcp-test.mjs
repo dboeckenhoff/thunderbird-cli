@@ -117,7 +117,15 @@ function handle({ method, path, body }) {
   if (path === "/messages/archive") return { success: true, archived: (body?.messageIds || []).length };
   if (path === "/messages/update") return { success: true };
   if (path === "/compose")
-    return { success: true, action: body?.send ? "sent" : body?.open ? "draft_opened" : "draft_saved" };
+    return {
+      success: true,
+      action: body?.send ? "sent" : body?.open ? "draft_opened" : "draft_saved",
+      attachments: (body?.attachments || []).map((a) => ({
+        name: a.name,
+        contentType: a.contentType,
+        size: a.data ? Buffer.from(a.data, "base64").length : 0,
+      })),
+    };
   if (path === "/reply") return { success: true, action: body?.send ? "sent" : "draft_saved" };
   if (path === "/forward") return { success: true, action: body?.send ? "sent" : "draft_saved" };
   if (path === "/stats")
@@ -397,6 +405,31 @@ test(
   await client.callTool("email_compose", { to: "a@b.com", body: "Hi", mode: "open" }),
   (r) => r.action === "draft_opened"
 );
+{
+  const { mkdtempSync, writeFileSync, rmSync } = await import("fs");
+  const os = await import("os");
+  const pathMod = await import("path");
+  const tmpDir = mkdtempSync(pathMod.join(os.tmpdir(), "tb-mcp-attach-"));
+  const attachPath = pathMod.join(tmpDir, "note.txt");
+  writeFileSync(attachPath, "mcp attachment body");
+  try {
+    test(
+      "email_compose with attachments",
+      await client.callTool("email_compose", {
+        to: "a@b.com",
+        body: "Hi",
+        attachments: [attachPath],
+      }),
+      (r) =>
+        r.success &&
+        r.attachments?.[0]?.name === "note.txt" &&
+        r.attachments?.[0]?.size === Buffer.from("mcp attachment body").length &&
+        r.attachments?.[0]?.contentType === "text/plain"
+    );
+  } finally {
+    rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
 
 test(
   "email_reply",

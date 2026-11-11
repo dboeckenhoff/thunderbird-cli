@@ -49,7 +49,7 @@ Use these; don't reach for the 38-command CLI unless the user explicitly asks fo
 | `email_list` | List folder contents, sortable, paginated | ✅ read-only |
 | `email_read` | Read a message. Modes: `default`, `headers`, `full`, `raw`, `body-only`, `check-download` | ✅ read-only |
 | `email_thread` | Full conversation thread for a message | ✅ read-only |
-| `email_compose` | New message. `mode: draft` / `open` / `send`. Defaults to `draft` | ✅ draft by default |
+| `email_compose` | New message. `mode: draft` / `open` / `send`. Defaults to `draft`. `attachments: [paths]` attaches files (≤ 20 MiB each) | ✅ draft by default |
 | `email_reply` | Reply to a message. Same modes. Defaults to `draft` | ✅ draft by default |
 | `email_forward` | Forward to a new recipient. Same modes. Defaults to `draft` | ✅ draft by default |
 | `email_mark` | Set read / unread / flagged / unflagged / junk / not-junk (batch supported) | ✅ reversible |
@@ -253,7 +253,7 @@ MCP tool → CLI command mapping:
 | `email_search` | `tb search "<q>" [filters]` |
 | `email_list` | `tb list <folder>` |
 | `email_read` | `tb read <id>` |
-| `email_compose` | `tb compose --to X --subject Y --body Z` |
+| `email_compose` | `tb compose --to X --subject Y --body Z [--attach FILE …]` |
 | `email_reply` | `tb reply <id> --body "..."` |
 | `email_forward` | `tb forward <id> --to X` |
 | `email_archive` | `tb archive <id>` / `tb move <id> <folder>` / `tb delete <id>` |

@@ -520,7 +520,8 @@ program
   .option("--html", "body is HTML")
   .option("--from <identityId>", "send from specific identity")
   .option("--priority <level>", "priority: highest|high|normal|low|lowest")
-  .option("--header <key:value>", "custom header")
+  .option("--header <key:value>", "custom header (repeatable)", (val, prev) => [...prev, val], [])
+  .option("--attach <file>", "attach a file (repeatable)", (val, prev) => [...prev, val], [])
   .option("--draft", "save as draft (default)")
   .option("--open", "open compose window")
   .option("--send", "send immediately")
@@ -542,7 +543,11 @@ program
     if (opts.bcc) payload.bcc = opts.bcc;
     if (opts.from) payload.identityId = opts.from;
     if (opts.priority) payload.priority = opts.priority;
-    if (opts.header) payload.header = opts.header;
+    if (opts.header?.length) payload.header = opts.header;
+    if (opts.attach?.length) {
+      const { readAttachment } = await import("./attachments.js");
+      payload.attachments = opts.attach.map(readAttachment);
+    }
 
     // Mode: send, open, or draft (default)
     if (opts.send) {
