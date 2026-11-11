@@ -8,11 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `tb compose --attach <file>` (repeatable) and `email_compose` `attachments: [paths]` — outbound attachments. Files are base64-transported through the bridge and added in Thunderbird via `messenger.compose.addAttachment` (needs the 2.1.0 extension build). Max 20 MiB per file; larger files should be shared as a link.
+- `tb compose --attach <file>` (repeatable) and `email_compose` `attachments: [paths]` — outbound attachments. Files are base64-transported through the bridge and added in Thunderbird via `messenger.compose.addAttachment` (needs the 2.0.4 extension build). Max 20 MiB per file; larger files should be shared as a link.
 
 ### Fixed
 - `tb compose --header` is now repeatable and the extension actually applies it — before, `--header` kept only the last value in the CLI and the extension dropped the field entirely, so custom headers (e.g. `In-Reply-To`/`References` for threaded replies) were silently lost.
-- `extension` version 2.0.3 → 2.1.0 to force a reload of the repacked XPI.
+- `extension` version 2.0.3 → 2.0.4 to force a reload of the repacked XPI.
+- Versions stay off upstream's numbers: CLI and MCP 1.0.3, bridge unchanged at 1.0.2, extension 2.0.4. Upstream 1.1.0/2.1.0 changed the bridge protocol and lacks `--attach`; reusing its numbers would mix the two.
 
 ### Changed
 - `test`: `npm test` now also runs `test/attachment-utils.test.mjs` (pure base64-decode unit tests for the extension helper).
